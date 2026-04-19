@@ -26,9 +26,10 @@ public partial class ViewController : NSViewController
         config.SetUrlSchemeHandler(new AppPageSchemeHandler(SampleHtml), "app-page");
 
 		// Cascade of http(s) interception strategies, picked at runtime based on what
-		// the current macOS version exposes.  In every case the goal is the same: see
-		// every sub-resource URL (including CSS url() and sub-frame loads) with the
-		// originating frame, and short-circuit the load in our process.
+		// the current macOS version exposes and which setup path successfully
+		// initializes.  In every case the goal is the same: see every sub-resource URL
+		// (including CSS url() and sub-frame loads) with the originating frame, and
+		// short-circuit the load in our process.
 		//
 		//   1. macOS 15.4+ — SetupExtension: a bundled WKWebExtension whose DNR rules
 		//      redirect http/https → filter-http/filter-https via
@@ -42,19 +43,33 @@ public partial class ViewController : NSViewController
 		//   3. Last resort — WKWebViewSwizzle.Install: swizzle
 		//      +[WKWebView handlesURLScheme:] so WKURLSchemeHandler can be registered
 		//      directly against http/https.
+        var interceptionConfigured = false;
+        var filterSchemeHandlersRegistered = false;
+
         if (OperatingSystem.IsMacOSVersionAtLeast(15, 4))
         {
-            config.SetUrlSchemeHandler(new InterceptingSchemeHandler(), "filter-http");
-            config.SetUrlSchemeHandler(new InterceptingSchemeHandler(), "filter-https");
-            await SetupExtension(config);
+            RegisterFilterSchemeHandlers(config);
+            filterSchemeHandlersRegistered = true;
+            interceptionConfigured = await SetupExtension(config);
+            if (!interceptionConfigured)
+                Console.Error.WriteLine("[Setup] Falling back from web extension strategy.");
         }
-        else if (config.DefaultWebpagePreferences!.RespondsToSelector(selSetActiveContentRuleListActionPatterns))
+
+        if (!interceptionConfigured &&
+            config.DefaultWebpagePreferences!.RespondsToSelector(selSetActiveContentRuleListActionPatterns))
         {
-            config.SetUrlSchemeHandler(new InterceptingSchemeHandler(), "filter-http");
-            config.SetUrlSchemeHandler(new InterceptingSchemeHandler(), "filter-https");
-            await SetupContentRuleList(config);
+            if (!filterSchemeHandlersRegistered)
+            {
+                RegisterFilterSchemeHandlers(config);
+                filterSchemeHandlersRegistered = true;
+            }
+
+            interceptionConfigured = await SetupContentRuleList(config);
+            if (!interceptionConfigured)
+                Console.Error.WriteLine("[Setup] Falling back from content-rule-list strategy.");
         }
-        else
+
+        if (!interceptionConfigured)
         {
             WKWebViewSwizzle.Install();
             config.SetUrlSchemeHandler(new InterceptingSchemeHandler(), "http");
@@ -83,9 +98,10 @@ public partial class ViewController : NSViewController
     // match patterns and the `declarativeNetRequestWithHostAccess` permission must
     // be explicitly granted on the context, otherwise
     // DocumentLoader::allowsActiveContentRuleListActionsForURL suppresses every
-    // redirect action the rules would produce.
+    // redirect action the rules would produce. Returns false when setup fails so
+    // the caller can continue down the strategy cascade.
     [SupportedOSPlatform("macos15.4")]
-    async Task SetupExtension(WKWebViewConfiguration config)
+    async Task<bool> SetupExtension(WKWebViewConfiguration config)
     {
         Console.WriteLine("[ExtBridge] Loading web extension…");
 
@@ -97,7 +113,7 @@ public partial class ViewController : NSViewController
         if (extension is null)
         {
             Console.Error.WriteLine($"[ExtBridge] Load failed: {createErr}");
-            return;
+            return false;
         }
 
         var ctx = new WKWebExtensionContext(extension);
@@ -112,10 +128,11 @@ public partial class ViewController : NSViewController
         if (!controller.LoadExtensionContext(ctx, out var loadErr))
         {
             Console.Error.WriteLine($"[ExtBridge] LoadExtensionContext failed: {loadErr}");
-            return;
+            return false;
         }
         config.WebExtensionController = controller;
         Console.WriteLine("[ExtBridge] Web extension loaded.");
+        return true;
     }
 
     // WKContentRuleList with the undocumented `redirect` action
@@ -132,7 +149,9 @@ public partial class ViewController : NSViewController
     // `regex-substitution` (not `transform.scheme`) is required: URL::setProtocol
     // silently no-ops across the WHATWG special↔non-special scheme boundary, so
     // swapping http → filter-http via `transform` leaves the URL unchanged.
-    async Task SetupContentRuleList(WKWebViewConfiguration config)
+    // Returns false when setup fails so the caller can continue down the strategy
+    // cascade.
+    async Task<bool> SetupContentRuleList(WKWebViewConfiguration config)
     {
         const string rulesJson = """
 			[
@@ -162,7 +181,7 @@ public partial class ViewController : NSViewController
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[ContentRules] Compile failed: {ex.Message}");
-            return;
+            return false;
         }
 
         var actionPatterns = NSDictionary.FromObjectsAndKeys(
@@ -170,6 +189,7 @@ public partial class ViewController : NSViewController
             new NSObject[] { (NSString)"BlockHttpHttps" });
         SetActiveContentRuleListActionPatterns(
             config.DefaultWebpagePreferences!, actionPatterns);
+        return true;
     }
 
     private const string SampleHtml = """
@@ -268,6 +288,12 @@ public partial class ViewController : NSViewController
 
     static readonly Selector selSetActiveContentRuleListActionPatterns =
         new("_setActiveContentRuleListActionPatterns:");
+
+    static void RegisterFilterSchemeHandlers(WKWebViewConfiguration config)
+    {
+        config.SetUrlSchemeHandler(new InterceptingSchemeHandler(), "filter-http");
+        config.SetUrlSchemeHandler(new InterceptingSchemeHandler(), "filter-https");
+    }
 
     [System.Runtime.InteropServices.DllImport(
         "/usr/lib/libobjc.dylib", EntryPoint = "objc_msgSend")]

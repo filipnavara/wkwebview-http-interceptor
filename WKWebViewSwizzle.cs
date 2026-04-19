@@ -14,6 +14,8 @@ namespace wkwebviewtest;
 /// </summary>
 static class WKWebViewSwizzle
 {
+    static readonly object s_installLock = new();
+
     // Signature of a WKWebView class-method IMP:
     //   self  = the WKWebView Class object
     //   sel   = the selector (_cmd)
@@ -23,6 +25,7 @@ static class WKWebViewSwizzle
     delegate bool HandlesURLSchemeFn(IntPtr self, IntPtr sel, IntPtr scheme);
 
     // Strong references — must outlive the swizzle to prevent GC collection.
+    static bool s_installed;
     static HandlesURLSchemeFn? s_original;
     static HandlesURLSchemeFn? s_replacement;
 
@@ -37,16 +40,23 @@ static class WKWebViewSwizzle
 
     public static void Install()
     {
-        var cls = Class.GetHandle("WKWebView");
-        var sel = Selector.GetHandle("handlesURLScheme:");
-        var method = class_getClassMethod(cls, sel);
+        lock (s_installLock)
+        {
+            if (s_installed)
+                return;
 
-        s_original = Marshal.GetDelegateForFunctionPointer<HandlesURLSchemeFn>(
-            method_getImplementation(method));
-        s_replacement = Replacement;
+            var cls = Class.GetHandle("WKWebView");
+            var sel = Selector.GetHandle("handlesURLScheme:");
+            var method = class_getClassMethod(cls, sel);
 
-        method_setImplementation(method,
-            Marshal.GetFunctionPointerForDelegate(s_replacement));
+            s_original = Marshal.GetDelegateForFunctionPointer<HandlesURLSchemeFn>(
+                method_getImplementation(method));
+            s_replacement = Replacement;
+
+            method_setImplementation(method,
+                Marshal.GetFunctionPointerForDelegate(s_replacement));
+            s_installed = true;
+        }
     }
 
     static bool Replacement(IntPtr self, IntPtr sel, IntPtr schemeHandle)

@@ -6,7 +6,7 @@ Each strategy ends up routing traffic through the same `InterceptingSchemeHandle
 
 ## Strategies
 
-The active strategy is picked at runtime by `ViewController.SetupWebView`, based on what the current macOS version exposes. Most to least preferred:
+The active strategy is picked at runtime by `ViewController.SetupWebView`, based on what the current macOS version exposes and which setup path initializes successfully. Most to least preferred:
 
 ### 1. WKWebExtension (macOS 15.4+) — no private API
 
@@ -40,7 +40,8 @@ Caveats:
 | File | Purpose |
 |------|---------|
 | `ViewController.cs` | Strategy selection + the Extension/ContentRuleList setup routines. |
-| `BlockedSchemeHandler.cs` | `InterceptingSchemeHandler` (used by all three strategies) and `AppPageSchemeHandler` (serves the demo HTML from `app-page://`). |
+| `InterceptingSchemeHandler.cs` | Shared interceptor used by all three strategies. |
+| `AppPageSchemeHandler.cs` | Serves the demo HTML from `app-page://`. |
 | `WKWebViewSwizzle.cs` | The `+[WKWebView handlesURLScheme:]` class-method swizzle. |
 | `Extension/manifest.json` | MV3 manifest declaring `declarativeNetRequest` + host permissions. |
 | `Extension/rules.json` | DNR redirect rules for `http → filter-http` and `https → filter-https`. |
