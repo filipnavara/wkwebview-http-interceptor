@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "HttpHttpsBlocker",
+  "version": "1.0",
+  "description": "Redirects all http/https sub-resources to filter-http/filter-https, which are handled by the app's URL scheme handlers.",
+
+  "permissions": [
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [ "<all_urls>" ],
+
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "blocklist",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  }
+}

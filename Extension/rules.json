@@ -1,0 +1,34 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": { "regexSubstitution": "filter-http://\\1" }
+    },
+    "condition": {
+      "regexFilter": "^http://(.*)",
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image",
+        "font", "object", "xmlhttprequest", "ping", "csp_report",
+        "media", "websocket", "other"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": { "regexSubstitution": "filter-https://\\1" }
+    },
+    "condition": {
+      "regexFilter": "^https://(.*)",
+      "resourceTypes": [
+        "main_frame", "sub_frame", "stylesheet", "script", "image",
+        "font", "object", "xmlhttprequest", "ping", "csp_report",
+        "media", "websocket", "other"
+      ]
+    }
+  }
+]
